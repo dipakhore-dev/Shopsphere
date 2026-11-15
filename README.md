@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # ShopSphere
 
 Multi-vendor e-commerce marketplace built with the MERN stack (JavaScript only).
@@ -278,3 +279,6 @@ shopsphere/
 ├── docs/postman/
 └── package.json
 ```
+=======
+# Shopsphere
+>>>>>>> 8b223893d53a077e129db484ae75f14a4972bfbe
