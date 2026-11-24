@@ -74,3 +74,65 @@ export function serializeProduct(p, { view = 'public', detail = true } = {}) {
   }
   return out;
 }
+
+export function serializeAddress(a) {
+  return {
+    id: String(a._id),
+    fullName: a.fullName,
+    phone: a.phone,
+    line1: a.line1,
+    line2: a.line2 ?? '',
+    landmark: a.landmark ?? '',
+    city: a.city,
+    state: a.state,
+    pincode: a.pincode,
+    country: a.country,
+    type: a.type,
+    isDefault: a.isDefault,
+  };
+}
+
+const CANCELLABLE = ['pending', 'confirmed', 'processing'];
+
+export function serializeShipment(s) {
+  return {
+    id: String(s._id),
+    store: { id: String(s.store), storeName: s.storeName },
+    status: s.status,
+    items: s.items.map((i) => ({
+      productId: String(i.product),
+      name: i.name,
+      brand: i.brand ?? null,
+      image: i.image ?? null,
+      quantity: i.quantity,
+      unitPrice: i.unitPrice,
+      unitFinalPrice: i.unitFinalPrice,
+      lineTotal: i.lineTotal,
+    })),
+    subtotal: s.subtotal,
+    shippingFee: s.shippingFee,
+    total: s.total,
+    statusHistory: (s.statusHistory ?? []).map((h) => ({ status: h.status, at: h.at, note: h.note ?? null })),
+  };
+}
+
+export function serializeOrder(order, shipments = []) {
+  const active = shipments.filter((s) => s.status !== 'cancelled');
+  return {
+    id: String(order._id),
+    orderNumber: order.orderNumber,
+    status: order.status,
+    paymentMethod: order.paymentMethod,
+    paymentStatus: order.paymentStatus,
+    subtotal: order.subtotal,
+    discountTotal: order.discountTotal,
+    shippingTotal: order.shippingTotal,
+    total: order.total,
+    shippingAddress: order.shippingAddress,
+    placedAt: order.placedAt,
+    cancelledAt: order.cancelledAt ?? null,
+    cancellationReason: order.cancellationReason ?? null,
+    canCancel: order.status !== 'cancelled' && active.length > 0 && active.every((s) => CANCELLABLE.includes(s.status)),
+    shipments: shipments.map(serializeShipment),
+  };
+}

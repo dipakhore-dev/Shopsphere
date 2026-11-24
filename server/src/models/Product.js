@@ -69,7 +69,8 @@ const productSchema = new Schema(
       validate: [(arr) => arr.length <= 20, 'A product can have at most 20 specifications'],
     },
 
-    // Maintained by the system (reviews in Phase 4, orders in Phase 4), never by the seller.
+    // Maintained by the system, never by the seller: soldCount by orders (Phase 4),
+    // ratings by reviews (Phase 5, once sellers can mark orders delivered).
     averageRating: { type: Number, default: 0, min: 0, max: 5 },
     reviewCount: { type: Number, default: 0, min: 0 },
     soldCount: { type: Number, default: 0, min: 0 },

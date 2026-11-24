@@ -42,6 +42,16 @@ export const authenticate = asyncHandler(async (req, _res, next) => {
 });
 
 /**
+ * For endpoints that work both logged in and logged out. No cookie -> anonymous (req.user stays
+ * undefined). A cookie that is present must be valid, otherwise the usual 401 is returned so the
+ * browser can silently refresh its session.
+ */
+export const optionalAuthenticate = (req, res, next) => {
+  if (!req.cookies?.[COOKIE_NAMES.access]) return next();
+  return authenticate(req, res, next);
+};
+
+/**
  * Authorization: what may they do?  Usage: router.get('/x', authenticate, authorize('admin'), handler)
  */
 export const authorize =

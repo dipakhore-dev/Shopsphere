@@ -43,6 +43,9 @@ const envSchema = z.object({
   SMTP_PORT: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().default(587)),
   SMTP_USER: optionalString,
   SMTP_PASS: optionalString,
+  SMTP_SECURE: z.preprocess(emptyToUndefined, z.enum(['true', 'false']).optional()),
+  EMAIL_VERIFICATION_TTL_MINUTES: z.preprocess(emptyToUndefined, z.coerce.number().int().min(5).max(1440).default(30)),
+  EMAIL_RESEND_COOLDOWN_SECONDS: z.preprocess(emptyToUndefined, z.coerce.number().int().min(0).max(3600).default(60)),
   EMAIL_FROM: z.string().default('ShopSphere <no-reply@shopsphere.local>'),
 
   // ---- image uploads (Cloudinary) ----
@@ -71,6 +74,20 @@ if (raw.COOKIE_SAME_SITE === 'none' && !cookieSecure) {
   fail(['COOKIE_SAME_SITE=none requires secure cookies (COOKIE_SECURE=true and HTTPS)']);
 }
 
+// Google displays App Passwords in groups ("abcd efgh ijkl mnop"); the spaces are not part of the password.
+const smtpPass = raw.SMTP_PASS?.replace(/\s+/g, '');
+
+if (raw.SMTP_HOST && Boolean(raw.SMTP_USER) !== Boolean(smtpPass)) {
+  fail(['SMTP_USER and SMTP_PASS must be set together']);
+}
+if (raw.SMTP_HOST?.includes('gmail.com') && !(raw.SMTP_USER && smtpPass)) {
+  fail(['Gmail SMTP needs SMTP_USER (your Gmail address) and SMTP_PASS (a Google App Password)']);
+}
+// Without SMTP, emails are only SIMULATED. Production must never pretend to send mail.
+if (isProduction && !raw.SMTP_HOST) {
+  fail(['SMTP_HOST, SMTP_USER and SMTP_PASS are required in production (verification emails cannot be simulated there)']);
+}
+
 const clientOrigins = raw.CLIENT_URL.split(',')
   .map((o) => o.trim().replace(/\/+$/, ''))
   .filter(Boolean);
@@ -92,6 +109,14 @@ export const env = Object.freeze({
     host: raw.SMTP_HOST,
     port: raw.SMTP_PORT,
     user: raw.SMTP_USER,
-    pass: raw.SMTP_PASS,
+    pass: smtpPass,
+    // true = TLS from the first byte (port 465). false = plain connection upgraded with STARTTLS (port 587).
+    secure: raw.SMTP_SECURE ? raw.SMTP_SECURE === 'true' : raw.SMTP_PORT === 465,
+  }),
+  email: Object.freeze({
+    verificationTtlMs: raw.EMAIL_VERIFICATION_TTL_MINUTES * 60 * 1000,
+    verificationTtlMinutes: raw.EMAIL_VERIFICATION_TTL_MINUTES,
+    resendCooldownMs: raw.EMAIL_RESEND_COOLDOWN_SECONDS * 1000,
+    resendCooldownSeconds: raw.EMAIL_RESEND_COOLDOWN_SECONDS,
   }),
 });

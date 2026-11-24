@@ -5,3 +5,5 @@ export const idParamSchema = z.object({ id: objectId });
 
 /** Query strings: treat "?q=" (empty) like "not provided". */
 export const optionalQuery = (schema) => z.preprocess((v) => (v === '' ? undefined : v), schema.optional());
+
+export const productIdParamSchema = z.object({ productId: objectId });

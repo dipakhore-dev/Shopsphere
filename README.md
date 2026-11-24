@@ -1,17 +1,16 @@
-<<<<<<< HEAD
 # ShopSphere
 
 Multi-vendor e-commerce marketplace built with the MERN stack (JavaScript only).
 
-**Status: Phase 3 - product marketplace**
+**Status: Phase 4 - cart, wishlist, addresses, checkout and orders**
 
 | Phase | Scope | Status |
 |-------|-------|--------|
 | 1 | Setup: React + Vite + Tailwind, Express, MongoDB connection, routing | Done |
 | 2 | Authentication and RBAC | Done |
 | 3 | Product marketplace | Done |
-| 4 | Customer shopping (cart, wishlist, addresses, checkout, orders) | Next |
-| 5 | Seller dashboard | |
+| 4 | Customer shopping (cart, wishlist, addresses, checkout, orders) | Done |
+| 5 | Seller dashboard, order fulfilment, reviews | Next |
 | 6 | Admin dashboard | |
 | 7 | Payments (Razorpay, COD, webhooks, refunds) | |
 | 8 | Testing and deployment | |
@@ -190,6 +189,152 @@ List responses: `{ success, data: { products }, meta: { page, limit, total, tota
 - **Soft delete**: deleted products stay in the database so Phase 4 order history can still show them. Images are not
   removed for the same reason (a cleanup job for unreferenced uploads comes in Phase 8).
 
+## 9. Phase 4: shopping and orders
+
+**Requirements.** Order placement uses MongoDB **transactions**, which need a replica set. MongoDB Atlas (including
+the free M0 tier) is one, so nothing to do. A plain local `mongod` is NOT: either use Atlas or start local MongoDB
+with `--replSet rs0` and run `rs.initiate()` once.
+
+No new packages or environment variables. Just unzip, then `npm run dev`.
+
+**Verify in the browser** (use a normal customer account whose email you verified through the server-console link):
+
+1. On a product card or page click the heart (wishlist) and **Add to cart**. The cart icon in the header shows a badge.
+2. `/cart`: change quantities, remove a line. Totals come from the server, with delivery charged **per seller**
+   (free from Rs 500 per seller, otherwise Rs 40).
+3. **Proceed to checkout**: add an address (inline), choose Cash on delivery, **Place order**. You land on the
+   confirmation page and the server console prints the order email.
+4. `/orders`: filter by status, open an order, open **Track**. Cancel it: the stock goes back on sale.
+5. On a product page use **Buy now**: it orders just that product and leaves the cart untouched.
+6. In the seller area (demo seller) the product's stock dropped by what you bought.
+7. Log in as the demo seller and try to buy one of their own products: refused.
+8. `npm test`.
+
+## API reference (Phase 4)
+
+All routes need a logged-in **customer or seller** (admins get 403) and the CSRF header on writes.
+
+| Method | Path | Notes |
+|--------|------|-------|
+| GET | `/api/cart` | Live prices, stock problems, totals, `canCheckout` |
+| POST | `/api/cart/items` | `{ productId, quantity }`, adds to the existing quantity |
+| PATCH | `/api/cart/items/:productId` | `{ quantity }`, sets an exact quantity |
+| DELETE | `/api/cart/items/:productId` | Removes a line |
+| DELETE | `/api/cart` | Empties the cart |
+| GET | `/api/wishlist` / `/api/wishlist/ids` | Products / just ids |
+| POST, DELETE | `/api/wishlist/:productId` | Idempotent add / remove |
+| GET, POST | `/api/addresses` | Max 10 per user; first one becomes default |
+| PATCH, DELETE | `/api/addresses/:id` | Own addresses only (others answer 404) |
+| POST | `/api/orders/preview` | Totals for the cart or `{ buyNow }` |
+| POST | `/api/orders` | Header `Idempotency-Key` required. Body `{ addressId, paymentMethod: "cod", buyNow? }`. Verified email required |
+| GET | `/api/orders/my` | `page, limit, status` |
+| GET | `/api/orders/:id` | Own orders only (others answer 404) |
+| PATCH | `/api/orders/:id/cancel` | `{ reason? }`. Allowed until a shipment has shipped |
+
+Machine-readable error codes include `INSUFFICIENT_STOCK`, `MAX_QUANTITY`, `OWN_PRODUCT`, `CART_EMPTY`,
+`CHECKOUT_CONFLICT`, `INVALID_ADDRESS`, `IDEMPOTENCY_KEY_REQUIRED`, `ORDER_ALREADY_CANCELLED`, `ORDER_NOT_CANCELLABLE`.
+
+Postman: re-import the collection, run the **Phase 4 - Shopping** folder after logging in as a customer.
+
+## How ordering works
+
+- **The server owns the money.** The cart stores only product ids and quantities. Every total comes from one function
+  (`pricing.service.js`) used by the cart, the checkout preview and order creation. The order endpoint has no price
+  field at all; any price sent is ignored.
+- **One order, one shipment per seller.** `Order` holds the money and the address. `SellerOrder` holds what each
+  seller ships, with its own status and history. Phase 5 lets sellers update only their own shipments. The parent
+  status is derived from the shipments (`deriveOrderStatus`).
+- **Placing an order is one transaction:** re-read products, price them, reserve stock with
+  `updateOne({ stock: { $gte: qty }, finalPrice }, { $inc })`, create the order and shipments, empty the cart. If any
+  step fails everything rolls back, so there are no half-orders and no stock leaks.
+- **No overselling.** The stock check and the decrement are a single atomic update, so with 1 item left and two
+  buyers exactly one succeeds.
+- **No duplicate orders.** The client sends an `Idempotency-Key`; a unique index on `(customer, idempotencyKey)`
+  guarantees one order per key. Repeating the request returns the same order with `200`.
+- **Snapshots.** Orders copy product name, image, prices and the delivery address, so later edits or deletions never
+  change history.
+- **Cancelling** is a transaction too: each shipment is claimed atomically (so it cannot race with a seller shipping it),
+  then stock and sold counters are restored.
+- **Cash on delivery** orders are confirmed immediately. Online payments (Phase 7) will start as `pending` and
+  confirm after server-side verification.
+
+## 10. Email verification (Gmail SMTP)
+
+Customers must verify their email before they can place an order. The API enforces this (`403 EMAIL_NOT_VERIFIED`);
+the React pages only make it friendly.
+
+### Configure Gmail (free)
+
+1. Google Account -> **Security** -> turn on **2-Step Verification**.
+2. Open https://myaccount.google.com/apppasswords , create an app password named `ShopSphere` and copy the 16 letters.
+   (If the page is missing, 2-Step Verification is off, or your Google Workspace admin has disabled app passwords.)
+3. Add these lines to your existing `server/.env` by hand (do not overwrite the file). Your normal Gmail password
+   will **not** work. Spaces in the app password are ignored.
+
+```env
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=your_email@gmail.com
+SMTP_PASS=your_16_letter_app_password
+EMAIL_FROM="ShopSphere <your_email@gmail.com>"
+CLIENT_URL=http://localhost:5173
+```
+
+`EMAIL_FROM` must use the same Gmail address, otherwise Gmail rewrites the sender. Use port `465` with
+`SMTP_SECURE=true` if 587 is blocked on your network. Personal Gmail allows roughly 500 messages a day.
+
+Optional: `EMAIL_VERIFICATION_TTL_MINUTES=30` and `EMAIL_RESEND_COOLDOWN_SECONDS=60` (these are the defaults).
+
+On start the server tells you whether SMTP works: `SMTP connection verified`, or `SMTP check FAILED (EAUTH)`.
+`EAUTH` means a wrong address or app password. Never commit `.env`.
+
+### Development mode (no SMTP)
+
+With `SMTP_HOST` empty nothing is delivered. The server prints a banner `EMAIL NOT SENT: development simulation`
+with the link, the API reports `"verificationEmail": "simulated"`, and the app warns you. In **production** the server
+refuses to start without SMTP, so a simulated email can never be mistaken for a real one.
+Tokens and links are only ever printed in this simulation mode, never in SMTP mode and never in API responses.
+
+### Windows PowerShell
+
+```powershell
+cd D:\shopsphere
+npm run install:all          # no new packages were needed
+npm test                     # backend tests (first run downloads a MongoDB binary)
+npm run build --prefix client   # production build check
+npm run dev
+```
+
+### Test it by hand
+
+1. Register at `http://localhost:5173/register` with an address you can read.
+2. An email "Verify your ShopSphere email" arrives (check spam). Without SMTP, copy the link from the server terminal.
+3. Add a product to the cart and open `/checkout` **before** verifying: you land on *Verify your email to check out*.
+   Click **Resend**: the button counts down 60 seconds. Clicking it again too early is refused by the server.
+4. Open the link. You see *Your email is verified* and are sent on to checkout (or your account).
+   The checkout tab you left open continues by itself when you switch back to it.
+5. Place a Cash on Delivery order: it succeeds. Open the same link again: *Your email is already verified*.
+6. Let a link sit past 30 minutes (or set `EMAIL_VERIFICATION_TTL_MINUTES=5`): the page says it expired and offers a new one.
+   When logged out it asks for your address and answers the same way for any address.
+
+### How it works
+
+- **Token**: 48 random bytes (`crypto`), only the **SHA-256 hash** is stored with an expiry (default 30 minutes).
+  The raw token exists only in the email link. A new token replaces (invalidates) the previous one.
+- **Verify** (`POST /api/auth/verify-email`) consumes the token with one atomic update, so two parallel clicks
+  cannot both succeed. Errors: `VERIFICATION_TOKEN_EXPIRED` or `VERIFICATION_TOKEN_INVALID` (unknown or already used).
+- **Resend** (`POST /api/auth/resend-verification`): logged in with `{}`, or logged out with `{ "email" }`.
+  One atomic update enforces "unverified" and "cooldown" together; logged-out callers always get the same answer.
+  Limits: cooldown (60 s) + 5 per hour per account + 10 per hour per IP.
+  Errors: `RESEND_COOLDOWN` (with `details.retryAfterSeconds` and a `Retry-After` header), `ALREADY_VERIFIED`,
+  `EMAIL_DELIVERY_FAILED`.
+- **Status** (`GET /api/auth/verification-status`) lets the page restore the cooldown timer after a refresh.
+- **If delivery fails** the token is discarded, so nobody is stuck behind a cooldown for an email that never left.
+  Registration itself still succeeds (`verificationEmail: "failed"`).
+- The link is opened with the token in the URL; the page removes it from the address bar immediately and the app sends
+  `Referrer-Policy: no-referrer`, so the token is not leaked to other sites.
+
 ## Test the auth API with Postman
 
 1. Import `docs/postman/ShopSphere.postman_collection.json`.
@@ -249,6 +394,15 @@ Error format: `{ "success": false, "message": "...", "code": "OPTIONAL_MACHINE_C
 | No emails arrive | Expected without SMTP: read the link in the server terminal. |
 | `npm test` is slow the first time | It downloads a MongoDB binary once. |
 | Product images do not show | Re-run `npm run seed:demo --prefix server` (older seeds pointed at an external site). For your own uploads open DevTools > Network > Img and check the failing URL's status. A failed image now shows a grey placeholder instead of a broken icon. |
+| `Transaction numbers are only allowed on a replica set member` | Order placement needs a replica set: use MongoDB Atlas, or run local MongoDB with `--replSet`. |
+| Checkout button stays disabled | Your email is not verified (open the link printed in the server terminal), or a cart line has a stock problem. |
+| `403 EMAIL_NOT_VERIFIED` when ordering | Same: verify your email first. |
+| `SMTP check FAILED (EAUTH)` at startup | Wrong Gmail address or password. Use a 16-letter **App Password**, not your normal password. |
+| `SMTP check FAILED (ETIMEDOUT)` / `ESOCKET` | The network blocks the port. Try port 465 with `SMTP_SECURE=true`. |
+| Email says "simulation" / `verificationEmail: "simulated"` | `SMTP_HOST` is empty. Fill in the `SMTP_*` values and restart. |
+| Server refuses to start: "SMTP_HOST ... required in production" | Set the `SMTP_*` variables on Render. Simulated email is disabled in production. |
+| Verify link on your phone opens `localhost` | `CLIENT_URL` must be a URL the phone can reach (your deployed site, or your PC's LAN address). |
+| `429 RESEND_COOLDOWN` | Wait for the countdown. The server enforces it, so refreshing the page does not reset it. |
 | `503 UPLOADS_NOT_CONFIGURED` | Add the three `CLOUDINARY_*` values to `server/.env` and restart. |
 | Seller list says 403 `SELLER_NOT_APPROVED` | Only seller accounts with an approved store work. Use the demo seller from `seed:demo`. |
 | Text search finds nothing for part of a word | `q` matches whole words (with stemming). Use the search-box suggestions for prefixes. |
@@ -259,26 +413,23 @@ Error format: `{ "success": false, "message": "...", "code": "OPTIONAL_MACHINE_C
 ```text
 shopsphere/
 ├── client/src/
-│   ├── components/{common,layout,auth,products,seller,cart}
+│   ├── components/{common,layout,auth,products,shop,seller}
 │   ├── pages/{public,customer,seller,admin}
 │   ├── layouts/           MainLayout, SellerLayout
 │   ├── routes/            AppRoutes, ProtectedRoute, GuestRoute
-│   ├── redux/slices/      uiSlice, authSlice, catalogSlice
+│   ├── redux/slices/      uiSlice, authSlice, catalogSlice, cartSlice, wishlistSlice
 │   ├── services/          api (interceptors), csrf, auth.service
 │   ├── hooks/  utils/      useAsync, useDebounce, money (paise), images
 ├── server/
 │   ├── src/
 │   │   ├── config/        env, db, cors
-│   │   ├── models/        User, RefreshSession, Category, SellerProfile, Product
-│   │   ├── services/      auth, token, email, product, imageStorage
+│   │   ├── models/        User, RefreshSession, Category, SellerProfile, Product, Address, Cart, Wishlist, Order, SellerOrder
+│   │   ├── services/      auth, token, email, product, imageStorage, pricing, cart, order, address, wishlist
 │   │   ├── controllers/  routes/  validators/
 │   │   ├── middleware/    auth, csrf, sanitize, validate, rateLimiter, errorHandler
 │   │   ├── scripts/       seedAdmin, seedDemo
 │   │   └── app.js  server.js
-│   └── tests/             health, auth, rbac, auth.ratelimit, products (+ helpers)
+│   └── tests/             health, auth, rbac, auth.ratelimit, products, cart, shopping (addresses+wishlist), orders (+ helpers)
 ├── docs/postman/
 └── package.json
 ```
-=======
-# Shopsphere
->>>>>>> 8b223893d53a077e129db484ae75f14a4972bfbe

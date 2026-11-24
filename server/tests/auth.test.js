@@ -276,6 +276,8 @@ describe('email verification', () => {
     const c = await createClient(app);
     await c.post(REG, validUser());
     outbox.length = 0;
+    // Registration just sent an email, so a resend is blocked by the cooldown. Pretend it was sent 10 minutes ago.
+    await User.updateOne({ email: 'asha@example.com' }, { emailVerificationExpires: new Date(Date.now() + 20 * 60 * 1000) });
     assert.equal((await c.post('/api/auth/resend-verification')).status, 200);
     assert.equal(outbox.length, 1);
 

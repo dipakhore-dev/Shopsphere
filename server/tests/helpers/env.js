@@ -6,6 +6,8 @@ Object.assign(process.env, {
   BCRYPT_ROUNDS: '4', // fast hashing in tests
   CLIENT_URL: 'http://localhost:5173',
   DISABLE_RATE_LIMIT: 'true',
+  EMAIL_VERIFICATION_TTL_MINUTES: '30',
+  EMAIL_RESEND_COOLDOWN_SECONDS: '60',
   CLOUDINARY_CLOUD_NAME: 'testcloud', // fake: uploads go to an in-memory adapter in tests
   CLOUDINARY_API_KEY: 'test',
   CLOUDINARY_API_SECRET: 'test',

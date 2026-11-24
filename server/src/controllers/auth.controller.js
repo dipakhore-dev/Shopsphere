@@ -1,4 +1,5 @@
 import * as authService from '../services/auth.service.js';
+import { ApiError } from '../utils/ApiError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { sendSuccess } from '../utils/apiResponse.js';
 import { clearAuthCookies, setAuthCookies } from '../utils/cookies.js';
@@ -16,12 +17,14 @@ export const getCsrfToken = (req, res) => {
 };
 
 export const register = asyncHandler(async (req, res) => {
-  const { user, accessToken, refreshToken } = await authService.register(req.body, meta(req));
+  const { user, accessToken, refreshToken, verificationEmail } = await authService.register(req.body, meta(req));
   setAuthCookies(res, { accessToken, refreshToken });
   sendSuccess(res, {
     statusCode: 201,
     message: 'Account created. Check your email to verify your address.',
-    data: { user: serializeUser(user) },
+    // 'sent' | 'simulated' (development: nothing was sent) | 'failed' (account exists; the user can resend).
+    // The verification token is NEVER part of any response.
+    data: { user: serializeUser(user), verificationEmail },
   });
 });
 
@@ -70,10 +73,23 @@ export const resetPassword = asyncHandler(async (req, res) => {
 
 export const verifyEmail = asyncHandler(async (req, res) => {
   await authService.verifyEmail(req.body.token);
-  sendSuccess(res, { message: 'Email verified' });
+  sendSuccess(res, { message: 'Email verified', data: { isEmailVerified: true } });
 });
 
 export const resendVerification = asyncHandler(async (req, res) => {
-  await authService.resendVerification(req.user);
-  sendSuccess(res, { message: 'Verification email sent' });
+  if (req.user) {
+    const { delivery, cooldownSeconds } = await authService.resendVerification(req.user);
+    return sendSuccess(res, { message: 'Verification email sent', data: { delivery, cooldownSeconds } });
+  }
+
+  if (!req.body.email) throw ApiError.unauthorized('Authentication required', 'AUTH_REQUIRED');
+
+  await authService.resendVerificationByEmail(req.body.email);
+  return sendSuccess(res, {
+    message: 'If that address belongs to an unverified account, a new verification email has been sent.',
+  });
+});
+
+export const verificationStatus = asyncHandler(async (req, res) => {
+  sendSuccess(res, { data: await authService.getVerificationStatus(req.user) });
 });

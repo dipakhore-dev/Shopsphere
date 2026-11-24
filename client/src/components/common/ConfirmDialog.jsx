@@ -5,7 +5,7 @@ import Button from './Button.jsx';
  * Uses the native <dialog> element: the browser provides the focus trap,
  * Esc-to-close and the backdrop, so it is accessible by default.
  */
-export default function ConfirmDialog({ open, title, message, confirmLabel = 'Confirm', danger = false, loading = false, onConfirm, onCancel }) {
+export default function ConfirmDialog({ open, title, message, confirmLabel = 'Confirm', danger = false, loading = false, onConfirm, onCancel, children }) {
   const ref = useRef(null);
 
   useEffect(() => {
@@ -30,6 +30,7 @@ export default function ConfirmDialog({ open, title, message, confirmLabel = 'Co
           {title}
         </h2>
         <p className="mt-2 text-sm text-ink-700">{message}</p>
+        {children}
         <div className="mt-6 flex justify-end gap-2">
           <Button variant="secondary" onClick={onCancel} disabled={loading}>
             Cancel

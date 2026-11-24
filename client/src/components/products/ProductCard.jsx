@@ -2,6 +2,8 @@ import { Link } from 'react-router-dom';
 import SafeImage from '../common/SafeImage.jsx';
 import StarRating from '../common/StarRating.jsx';
 import PriceTag from './PriceTag.jsx';
+import AddToCartButton from './AddToCartButton.jsx';
+import WishlistButton from './WishlistButton.jsx';
 import { optimizeImageUrl } from '../../utils/images.js';
 
 export default function ProductCard({ product }) {
@@ -18,6 +20,7 @@ export default function ProductCard({ product }) {
             className="size-full object-cover transition-transform duration-300 group-hover:scale-105"
           />
         )}
+        <WishlistButton productId={product.id} productName={product.name} className="absolute right-3 top-3 z-10" />
         {product.discountPercent > 0 && (
           <span className="absolute left-3 top-3 rounded-md bg-marigold-500 px-2 py-1 text-xs font-bold text-ink-900">
             {product.discountPercent}% OFF
@@ -41,6 +44,10 @@ export default function ProductCard({ product }) {
         <StarRating rating={product.averageRating} count={product.reviewCount} />
         <div className="mt-auto pt-2">
           <PriceTag product={product} />
+        </div>
+        {/* z-10 lifts the button above the card-wide link overlay */}
+        <div className="relative z-10 pt-2">
+          <AddToCartButton product={product} size="sm" variant="secondary" className="w-full" />
         </div>
       </div>
     </article>

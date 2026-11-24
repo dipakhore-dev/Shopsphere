@@ -1,6 +1,7 @@
 import app from './app.js';
 import { env } from './config/env.js';
 import { connectDB, disconnectDB } from './config/db.js';
+import { verifyEmailTransport } from './services/email.service.js';
 import { logger } from './utils/logger.js';
 
 let server;
@@ -17,6 +18,8 @@ async function start() {
   server = app.listen(env.PORT, () => {
     logger.info(`ShopSphere API listening on port ${env.PORT} (${env.NODE_ENV})`);
   });
+
+  verifyEmailTransport(); // logs whether SMTP works; never blocks or crashes startup
 }
 
 async function shutdown(signal) {

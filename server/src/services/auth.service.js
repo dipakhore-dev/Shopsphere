@@ -11,7 +11,6 @@ import { sendPasswordResetEmail, sendVerificationEmail } from './email.service.j
 
 const MAX_FAILED_LOGINS = 5;
 const LOCK_MS = 15 * 60 * 1000;
-const VERIFY_TTL_MS = 24 * 60 * 60 * 1000;
 const RESET_TTL_MS = 60 * 60 * 1000;
 
 /**
@@ -58,12 +57,64 @@ function revokeAllForUser(userId, reason) {
   );
 }
 
-async function issueVerificationToken(user) {
+/** Seconds until another email may be requested (0 = allowed now). The time of the last send is
+ *  derived from the token's expiry (expires - TTL), so no extra database field is needed. */
+function cooldownRemainingSeconds(expires) {
+  if (!expires) return 0;
+  // A token that outlives the current TTL was issued under the old 24-hour rule: never make anyone wait on it.
+  if (expires.getTime() > Date.now() + env.email.verificationTtlMs) return 0;
+  const waitMs = expires.getTime() - env.email.verificationTtlMs + env.email.resendCooldownMs - Date.now();
+  return waitMs > 0 ? Math.ceil(waitMs / 1000) : 0;
+}
+
+/**
+ * Creates a fresh verification token and emails it. ONE atomic update both enforces the rules and stores
+ * the new token (replacing, and so invalidating, any older one):
+ *   - the user must still be unverified
+ *   - no email may have been sent within the cooldown window
+ * Two simultaneous requests therefore cannot both send an email.
+ *
+ * Resolves to { outcome: 'sent' | 'simulated' | 'failed' | 'cooldown' | 'verified', retryAfterSeconds? }
+ */
+async function issueVerificationEmail(userId) {
   const { token, hash } = generateOpaqueToken();
-  user.emailVerificationTokenHash = hash;
-  user.emailVerificationExpires = new Date(Date.now() + VERIFY_TTL_MS);
-  await user.save();
-  return token;
+  const now = Date.now();
+  const sentBefore = new Date(now + env.email.verificationTtlMs - env.email.resendCooldownMs);
+
+  const user = await User.findOneAndUpdate(
+    {
+      _id: userId,
+      isEmailVerified: false,
+      $or: [
+        { emailVerificationExpires: { $exists: false } },
+        { emailVerificationExpires: null },
+        { emailVerificationExpires: { $lte: sentBefore } }, // last email is older than the cooldown
+        { emailVerificationExpires: { $gt: new Date(now + env.email.verificationTtlMs) } }, // legacy long-lived token
+      ],
+    },
+    { $set: { emailVerificationTokenHash: hash, emailVerificationExpires: new Date(now + env.email.verificationTtlMs) } },
+    { new: true },
+  );
+
+  if (!user) {
+    // Not claimed: either already verified, or an email went out too recently.
+    const current = await User.findById(userId).select('+emailVerificationExpires isEmailVerified').lean();
+    if (!current || current.isEmailVerified) return { outcome: 'verified' };
+    return { outcome: 'cooldown', retryAfterSeconds: Math.max(1, cooldownRemainingSeconds(current.emailVerificationExpires)) };
+  }
+
+  try {
+    const { status } = await sendVerificationEmail(user, token);
+    return { outcome: status }; // 'sent' | 'simulated'
+  } catch (err) {
+    logger.error('Verification email could not be delivered; token discarded so the user can retry immediately');
+    // Keep state consistent: do not leave a token (and a cooldown) behind for an email that never left.
+    await User.updateOne(
+      { _id: userId, emailVerificationTokenHash: hash },
+      { $unset: { emailVerificationTokenHash: 1, emailVerificationExpires: 1 } },
+    );
+    return { outcome: 'failed' };
+  }
 }
 
 /** Email problems must never break registration or leak whether an account exists. */
@@ -85,11 +136,11 @@ export async function register({ name, email, password }, meta) {
   // role and status are NOT taken from input: they always default to customer/active.
   const user = await User.create({ name, email, password });
 
-  const token = await issueVerificationToken(user);
-  await safeSend(sendVerificationEmail, user, token);
+  // A failed email never fails registration: the account exists and the user can request another email.
+  const verification = await issueVerificationEmail(user._id);
 
   const session = await createSession(user, meta);
-  return { user, ...session };
+  return { user, ...session, verificationEmail: verification.outcome };
 }
 
 export async function login({ email, password }, meta) {
@@ -183,25 +234,67 @@ export async function logout(rawToken) {
   if (session) await revokeFamily(session.family, 'logout');
 }
 
+/**
+ * Single-use verification. The token is consumed by ONE atomic update, so two simultaneous requests with
+ * the same link cannot both succeed. Only the SHA-256 hash is ever looked up.
+ */
 export async function verifyEmail(rawToken) {
-  const user = await User.findOne({
-    emailVerificationTokenHash: hashToken(rawToken),
-    emailVerificationExpires: { $gt: new Date() },
-  });
+  const hash = hashToken(rawToken);
 
-  if (!user) throw ApiError.badRequest('This verification link is invalid or has expired');
+  const user = await User.findOneAndUpdate(
+    { emailVerificationTokenHash: hash, emailVerificationExpires: { $gt: new Date() } },
+    { $set: { isEmailVerified: true }, $unset: { emailVerificationTokenHash: 1, emailVerificationExpires: 1 } },
+    { new: true },
+  );
+  if (user) return user;
 
-  user.isEmailVerified = true;
-  user.emailVerificationTokenHash = undefined;
-  user.emailVerificationExpires = undefined;
-  await user.save();
-  return user;
+  // Not consumed. Tell the user whether the link EXPIRED (they can request a new one) or is simply unknown/used.
+  const stale = await User.exists({ emailVerificationTokenHash: hash });
+  if (stale) {
+    throw new ApiError(400, 'This verification link has expired. Please request a new one.', undefined, 'VERIFICATION_TOKEN_EXPIRED');
+  }
+  throw new ApiError(400, 'This verification link is invalid or has already been used.', undefined, 'VERIFICATION_TOKEN_INVALID');
 }
 
+/** Logged-in users: explicit errors are fine because they already know their own account. */
 export async function resendVerification(user) {
-  if (user.isEmailVerified) throw ApiError.conflict('Your email is already verified');
-  const token = await issueVerificationToken(user);
-  await safeSend(sendVerificationEmail, user, token);
+  const result = await issueVerificationEmail(user._id);
+
+  switch (result.outcome) {
+    case 'verified':
+      throw new ApiError(409, 'Your email is already verified', undefined, 'ALREADY_VERIFIED');
+    case 'cooldown':
+      throw ApiError.tooMany(
+        `Please wait ${result.retryAfterSeconds} seconds before requesting another email.`,
+        'RESEND_COOLDOWN',
+        { retryAfterSeconds: result.retryAfterSeconds },
+      );
+    case 'failed':
+      throw new ApiError(503, 'We could not send the email right now. Please try again in a moment.', undefined, 'EMAIL_DELIVERY_FAILED');
+    default:
+      return { delivery: result.outcome, cooldownSeconds: env.email.resendCooldownSeconds };
+  }
+}
+
+/**
+ * Logged-out users (for example the link expired and they signed out). The caller always receives the SAME
+ * answer, so this endpoint cannot be used to discover which emails are registered or verified.
+ */
+export async function resendVerificationByEmail(email) {
+  const user = await User.findOne({ email }).select('_id status isEmailVerified').lean();
+  if (user && user.status === USER_STATUS.ACTIVE && !user.isEmailVerified) {
+    await issueVerificationEmail(user._id); // cooldown / delivery problems are deliberately not revealed
+  }
+}
+
+/** Powers the "verification required" page: the address and how long until another email may be sent. */
+export async function getVerificationStatus(user) {
+  const current = await User.findById(user._id).select('+emailVerificationExpires email isEmailVerified').lean();
+  return {
+    email: current.email,
+    isEmailVerified: current.isEmailVerified,
+    cooldownSeconds: current.isEmailVerified ? 0 : cooldownRemainingSeconds(current.emailVerificationExpires),
+  };
 }
 
 /** Always resolves the same way, whether or not the email is registered. */

@@ -10,3 +10,11 @@ export function formatUptime(totalSeconds) {
   if (m > 0) return `${m}m ${s % 60}s`;
   return `${s}s`;
 }
+
+export function formatDateTime(value) {
+  return new Date(value).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+export function formatDate(value) {
+  return new Date(value).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+}

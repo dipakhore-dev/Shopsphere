@@ -14,10 +14,12 @@ export function errorHandler(err, req, res, _next) {
   let message = err.message || 'Internal server error';
   let errors;
   let code;
+  let details;
 
   if (err instanceof ApiError) {
     errors = err.errors;
     code = err.code;
+    details = err.details;
   } else if (err instanceof ZodError) {
     statusCode = 400;
     message = 'Validation failed';
@@ -54,6 +56,10 @@ export function errorHandler(err, req, res, _next) {
 
   const body = { success: false, message };
   if (code) body.code = code;
+  if (details) {
+    body.details = details;
+    if (details.retryAfterSeconds) res.set('Retry-After', String(details.retryAfterSeconds));
+  }
   if (errors) body.errors = errors;
   if (!env.isProduction && statusCode >= 500) body.stack = err.stack;
 

@@ -29,3 +29,6 @@ export const loginSchema = z.object({ email, password: z.string().min(1, 'Passwo
 export const forgotPasswordSchema = z.object({ email });
 export const resetPasswordSchema = z.object({ token, password });
 export const verifyEmailSchema = z.object({ token });
+
+// Logged-in users send {}. Logged-out users must send the email address to re-send to.
+export const resendVerificationSchema = z.object({ email: email.optional() });

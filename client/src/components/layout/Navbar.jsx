@@ -2,13 +2,14 @@ import { useEffect } from 'react';
 import { NavLink, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import toast from 'react-hot-toast';
-import { LayoutDashboard, LogOut, Menu, X } from 'lucide-react';
+import { Heart, LayoutDashboard, LogOut, Menu, ShoppingCart, X } from 'lucide-react';
 import Logo from '../common/Logo.jsx';
 import SearchBar from './SearchBar.jsx';
 import CategoryBar from './CategoryBar.jsx';
 import Button from '../common/Button.jsx';
 import { closeMobileMenu, toggleMobileMenu } from '../../redux/slices/uiSlice.js';
 import { logoutUser } from '../../redux/slices/authSlice.js';
+import { selectCartCount } from '../../redux/slices/cartSlice.js';
 import { useAuth } from '../../hooks/useAuth.js';
 import { getDashboardPath } from '../../utils/roles.js';
 import { cn } from '../../utils/cn.js';
@@ -23,6 +24,31 @@ const linkClass = ({ isActive }) =>
     'rounded-md px-3 py-2 text-sm font-medium transition-colors',
     isActive ? 'bg-brand-50 text-brand-700' : 'text-ink-700 hover:bg-ink-100',
   );
+
+/** Wishlist and cart shortcuts for logged-in shoppers (not shown to admins). */
+function ShopLinks() {
+  const { user, initialized } = useAuth();
+  const count = useSelector(selectCartCount);
+  const saved = useSelector((s) => s.wishlist.ids.length);
+  if (!initialized || !user || user.role === 'admin') return null;
+
+  const icon = 'relative inline-flex size-10 items-center justify-center rounded-lg text-ink-900 hover:bg-ink-100';
+  return (
+    <div className="flex items-center">
+      <Link to="/wishlist" className={icon} aria-label={`Wishlist, ${saved} saved`}>
+        <Heart className="size-5" aria-hidden="true" />
+      </Link>
+      <Link to="/cart" className={icon} aria-label={`Cart, ${count} ${count === 1 ? 'item' : 'items'}`}>
+        <ShoppingCart className="size-5" aria-hidden="true" />
+        {count > 0 && (
+          <span aria-hidden="true" className="absolute -right-0.5 -top-0.5 flex min-w-5 items-center justify-center rounded-full bg-marigold-500 px-1 text-[11px] font-bold text-ink-900">
+            {count > 99 ? '99+' : count}
+          </span>
+        )}
+      </Link>
+    </div>
+  );
+}
 
 function AccountActions({ stacked = false }) {
   const dispatch = useDispatch();
@@ -90,10 +116,13 @@ export default function Navbar() {
           ))}
         </nav>
 
-        <div className="hidden lg:block">
+        <div className="hidden items-center gap-1 lg:flex">
+          <ShopLinks />
           <AccountActions />
         </div>
 
+        <div className="flex items-center gap-1 lg:hidden">
+          <ShopLinks />
         <button
           type="button"
           className="inline-flex size-10 items-center justify-center rounded-lg text-ink-900 hover:bg-ink-100 lg:hidden"
@@ -104,6 +133,7 @@ export default function Navbar() {
         >
           {open ? <X className="size-6" aria-hidden="true" /> : <Menu className="size-6" aria-hidden="true" />}
         </button>
+        </div>
       </div>
 
       {/* Search is always visible on phones and tablets */}

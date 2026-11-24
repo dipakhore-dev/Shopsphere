@@ -1,4 +1,5 @@
-import { Link, useParams } from 'react-router-dom';
+import { useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Store, PackageCheck, PackageX } from 'lucide-react';
 import ImageGallery from '../../components/products/ImageGallery.jsx';
 import PriceTag from '../../components/products/PriceTag.jsx';
@@ -6,6 +7,10 @@ import StarRating from '../../components/common/StarRating.jsx';
 import ErrorState from '../../components/common/ErrorState.jsx';
 import Button from '../../components/common/Button.jsx';
 import Spinner from '../../components/common/Spinner.jsx';
+import QuantityStepper from '../../components/common/QuantityStepper.jsx';
+import AddToCartButton from '../../components/products/AddToCartButton.jsx';
+import WishlistButton from '../../components/products/WishlistButton.jsx';
+import { useRequireAuth } from '../../hooks/useRequireAuth.js';
 import { useAsync } from '../../hooks/useAsync.js';
 import { fetchProduct } from '../../services/product.service.js';
 
@@ -22,6 +27,33 @@ function Stock({ stock }) {
       <PackageCheck className="size-5" aria-hidden="true" />
       {stock <= 10 ? `Only ${stock} left in stock` : 'In stock'}
     </p>
+  );
+}
+
+function PurchasePanel({ product }) {
+  const navigate = useNavigate();
+  const requireAuth = useRequireAuth();
+  const [qty, setQty] = useState(1);
+  const max = Math.min(10, product.stock);
+
+  return (
+    <div className="mt-6 space-y-4">
+      {product.inStock && (
+        <div className="flex items-center gap-4">
+          <span className="text-sm font-medium">Quantity</span>
+          <QuantityStepper value={qty} max={max} onChange={setQty} />
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-3">
+        <AddToCartButton product={product} quantity={qty} size="lg" />
+        {product.inStock && (
+          <Button size="lg" variant="accent" onClick={() => requireAuth() && navigate(`/checkout?buyNow=${product.id}&qty=${qty}`)}>
+            Buy now
+          </Button>
+        )}
+        <WishlistButton productId={product.id} productName={product.name} className="size-12 border border-ink-100" />
+      </div>
+    </div>
   );
 }
 
@@ -92,9 +124,7 @@ export default function ProductDetailsPage() {
             </p>
           )}
 
-          <p className="mt-6 rounded-lg border border-ink-100 bg-white p-4 text-sm text-ink-700">
-            Add to cart and Buy now are added in <strong>Phase 4</strong> (cart and checkout).
-          </p>
+          <PurchasePanel key={product.id} product={product} />
 
           <section className="mt-8" aria-labelledby="desc-heading">
             <h2 id="desc-heading" className="text-xl font-bold">About this item</h2>

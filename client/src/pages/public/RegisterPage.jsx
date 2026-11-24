@@ -19,8 +19,14 @@ export default function RegisterPage() {
 
   const onSubmit = async ({ name, email, password }) => {
     try {
-      await dispatch(registerUser({ name, email, password })).unwrap();
-      toast.success('Account created. Check your email to verify your address.');
+      const { verificationEmail } = await dispatch(registerUser({ name, email, password })).unwrap();
+      if (verificationEmail === 'sent') {
+        toast.success('Account created. Check your email to verify your address.');
+      } else if (verificationEmail === 'simulated') {
+        toast('Account created. Development mode: no real email was sent. Open the verification link printed in the server terminal.', { duration: 9000 });
+      } else {
+        toast.error('Account created, but we could not send the verification email. Request a new one from your account page.', { duration: 9000 });
+      }
     } catch (message) {
       toast.error(typeof message === 'string' ? message : 'Could not create your account.');
     }

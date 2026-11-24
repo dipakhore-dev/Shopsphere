@@ -138,7 +138,7 @@ async function main() {
           { key: 'Warranty', value: categoryName === 'Books' ? 'Not applicable' : '1 year' },
           { key: 'Country of origin', value: 'India' },
         ],
-        // DEMO numbers so sorting by rating/popularity can be tried. Real values arrive with reviews and orders (Phase 4).
+        // DEMO numbers so sorting by rating/popularity can be tried. Ratings become real with reviews (Phase 5); soldCount now changes with real orders.
         averageRating: Math.min(5, Number((3.4 + ((index * 37) % 17) / 10).toFixed(1))),
         reviewCount: 12 + ((index * 53) % 400),
         soldCount: (index * 97) % 900,

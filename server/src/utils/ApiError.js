@@ -6,12 +6,13 @@
  * frontend can branch on without parsing human-readable messages.
  */
 export class ApiError extends Error {
-  constructor(statusCode, message, errors = undefined, code = undefined) {
+  constructor(statusCode, message, errors = undefined, code = undefined, details = undefined) {
     super(message);
     this.name = 'ApiError';
     this.statusCode = statusCode;
     this.errors = errors;
     this.code = code;
+    this.details = details;
     this.isOperational = true;
     Error.captureStackTrace?.(this, this.constructor);
   }
@@ -31,7 +32,7 @@ export class ApiError extends Error {
   static conflict(message = 'Conflict') {
     return new ApiError(409, message);
   }
-  static tooMany(message = 'Too many requests', code) {
-    return new ApiError(429, message, undefined, code);
+  static tooMany(message = 'Too many requests', code, details) {
+    return new ApiError(429, message, undefined, code, details);
   }
 }

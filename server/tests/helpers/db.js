@@ -1,14 +1,17 @@
 import mongoose from 'mongoose';
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import { MongoMemoryReplSet } from 'mongodb-memory-server';
 
-let mongod;
+let replSet;
 
-/** Starts a throw-away MongoDB in memory (first run downloads a mongod binary, then it is cached). */
+/**
+ * Starts a throw-away single-node REPLICA SET in memory. MongoDB transactions (used for orders)
+ * only work on replica sets. The first run downloads a mongod binary, then it is cached.
+ */
 export async function startTestDb() {
-  mongod = await MongoMemoryServer.create();
-  await mongoose.connect(mongod.getUri(), { dbName: 'shopsphere_test' });
+  replSet = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
+  await mongoose.connect(replSet.getUri(), { dbName: 'shopsphere_test' });
 
-  // Make sure unique / TTL indexes exist before the first test runs.
+  // Build unique / TTL / text indexes before the first test runs.
   await Promise.all(Object.values(mongoose.models).map((m) => m.init()));
 }
 
@@ -18,5 +21,5 @@ export async function clearDb() {
 
 export async function stopTestDb() {
   await mongoose.disconnect();
-  await mongod?.stop();
+  await replSet?.stop();
 }
